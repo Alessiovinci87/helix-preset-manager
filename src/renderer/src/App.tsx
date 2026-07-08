@@ -293,12 +293,12 @@ export default function App() {
     fetchPage(0)
   }, [fetchPage])
 
-  const doImport = useCallback(() => {
+  const doImport = useCallback((mode: 'folder' | 'zip' = 'folder') => {
     setImporting(true)
     setProgress(null)
     setError(null)
     window.api
-      .importFolder()
+      .importFolder(mode)
       .then((res) => {
         if (!res) return // annullato
         refreshAll()
@@ -344,10 +344,24 @@ export default function App() {
         </label>
         <div className="ml-auto flex items-center gap-3">
           {importing && (
-            <span className="text-xs whitespace-nowrap text-amber-400">
-              {progress
-                ? `Importazione… ${progress.files.toLocaleString('it-IT')} file, ${progress.presets.toLocaleString('it-IT')} preset`
-                : 'Importazione…'}
+            <span className="flex items-center gap-2 text-xs whitespace-nowrap text-amber-400">
+              <span className="relative h-1.5 w-28 overflow-hidden rounded-full bg-zinc-800">
+                {progress?.phase === 'finalize' || !progress?.totalFiles ? (
+                  <span className="absolute inset-0 animate-pulse rounded-full bg-amber-500/70" />
+                ) : (
+                  <span
+                    className="absolute inset-y-0 left-0 rounded-full bg-amber-500 transition-[width] duration-200"
+                    style={{
+                      width: `${Math.min(100, (progress.files / progress.totalFiles) * 100)}%`,
+                    }}
+                  />
+                )}
+              </span>
+              {progress?.phase === 'finalize'
+                ? 'Finalizzazione indice…'
+                : progress?.totalFiles
+                  ? `${Math.round((progress.files / progress.totalFiles) * 100)}% — ${progress.files.toLocaleString('it-IT')}/${progress.totalFiles.toLocaleString('it-IT')} file · ${progress.presets.toLocaleString('it-IT')} preset`
+                  : 'Scansione cartella…'}
             </span>
           )}
           {!importing && stats && (
@@ -356,11 +370,19 @@ export default function App() {
             </span>
           )}
           <button
-            onClick={doImport}
+            onClick={() => doImport('folder')}
             disabled={importing}
             className="rounded-md bg-sky-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-600 disabled:opacity-50"
           >
             Importa cartella…
+          </button>
+          <button
+            onClick={() => doImport('zip')}
+            disabled={importing}
+            title="Importa i preset direttamente da un archivio ZIP, senza estrarlo"
+            className="rounded-md border border-sky-800 px-3 py-1.5 text-xs font-medium text-sky-300 hover:border-sky-600 disabled:opacity-50"
+          >
+            ZIP…
           </button>
         </div>
       </header>
@@ -493,13 +515,22 @@ export default function App() {
                   Importa la cartella dove tieni i tuoi preset (.hlx, setlist, .hsp): verranno
                   indicizzati, classificati e deduplicati. I file originali non vengono toccati.
                 </p>
-                <button
-                  onClick={doImport}
-                  disabled={importing}
-                  className="rounded-md bg-sky-700 px-4 py-2 text-sm font-medium text-white hover:bg-sky-600 disabled:opacity-50"
-                >
-                  Importa cartella…
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => doImport('folder')}
+                    disabled={importing}
+                    className="rounded-md bg-sky-700 px-4 py-2 text-sm font-medium text-white hover:bg-sky-600 disabled:opacity-50"
+                  >
+                    Importa cartella…
+                  </button>
+                  <button
+                    onClick={() => doImport('zip')}
+                    disabled={importing}
+                    className="rounded-md border border-sky-800 px-4 py-2 text-sm font-medium text-sky-300 hover:border-sky-600 disabled:opacity-50"
+                  >
+                    Importa ZIP…
+                  </button>
+                </div>
               </div>
             ) : (
               <p className="p-8 text-center text-sm text-zinc-600">Nessun risultato</p>

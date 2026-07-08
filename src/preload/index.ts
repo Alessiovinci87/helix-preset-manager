@@ -5,7 +5,7 @@ const api: HelixApi = {
   stats: () => ipcRenderer.invoke('db:stats'),
   search: (req: SearchRequest) => ipcRenderer.invoke('db:search', req),
   show: (id: number) => ipcRenderer.invoke('db:show', id),
-  importFolder: () => ipcRenderer.invoke('import:folder'),
+  importFolder: (mode?: 'folder' | 'zip') => ipcRenderer.invoke('import:folder', mode),
   onImportProgress: (cb: (p: ImportProgress) => void) => {
     const listener = (_e: Electron.IpcRendererEvent, p: ImportProgress) => cb(p)
     ipcRenderer.on('import:progress', listener)

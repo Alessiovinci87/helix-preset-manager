@@ -8,7 +8,7 @@
  */
 import { DatabaseSync } from 'node:sqlite';
 import { createHash } from 'node:crypto';
-import { inflateSync } from 'node:zlib';
+import { inflateSync, inflateRawSync } from 'node:zlib';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, basename } from 'node:path';
 
@@ -312,6 +312,40 @@ function* walk(dir) {
   }
 }
 
+// ── lettore ZIP minimale (central directory), zero dipendenze ──
+export function readZipEntries(buf) {
+  let i = buf.length - 22;                       // EOCD senza commento
+  const min = Math.max(0, i - 65535);
+  while (i >= min && buf.readUInt32LE(i) !== 0x06054b50) i--;
+  if (i < min) throw new Error('archivio ZIP non valido (EOCD mancante)');
+  const count = buf.readUInt16LE(i + 10);
+  let off = buf.readUInt32LE(i + 16);
+  const entries = [];
+  for (let n = 0; n < count; n++) {
+    if (buf.readUInt32LE(off) !== 0x02014b50) break;
+    const method = buf.readUInt16LE(off + 10);
+    const csize = buf.readUInt32LE(off + 20);
+    const nameLen = buf.readUInt16LE(off + 28);
+    const extraLen = buf.readUInt16LE(off + 30);
+    const commentLen = buf.readUInt16LE(off + 32);
+    const lho = buf.readUInt32LE(off + 42);
+    const name = buf.subarray(off + 46, off + 46 + nameLen).toString('utf8');
+    entries.push({ name, method, csize, lho });
+    off += 46 + nameLen + extraLen + commentLen;
+  }
+  return entries;
+}
+
+export function zipEntryData(buf, entry) {
+  const nameLen = buf.readUInt16LE(entry.lho + 26);
+  const extraLen = buf.readUInt16LE(entry.lho + 28);
+  const start = entry.lho + 30 + nameLen + extraLen;
+  const data = buf.subarray(start, start + entry.csize);
+  if (entry.method === 0) return Buffer.from(data);
+  if (entry.method === 8) return inflateRawSync(data);
+  throw new Error(`metodo di compressione ZIP ${entry.method} non supportato`);
+}
+
 function main() {
   const root = process.argv[2];
   const dbPath = process.argv[3] || 'helix.db';
@@ -343,14 +377,40 @@ function main() {
     }
   } catch { /* DB nuovo, nessuno stato precedente */ }
 
+  const isPresetName = n =>
+    /\.(hlx|hsp)(\s+copy)?$/i.test(n) || /[\\/](U2 40|Purple|PRS Archon|Cougar ATT 15)$/.test(n);
+
+  // prima passata: elenca i candidati (file sciolti + entry dentro gli ZIP)
+  // root può essere una cartella oppure direttamente un archivio .zip
+  const candidates = []; // { file: percorso o "zip::entry", zip?: { path, entry } }
+  const sources = statSync(root).isDirectory() ? walk(root) : [root];
+  for (const file of sources) {
+    if (isPresetName(file)) { candidates.push({ file }); continue; }
+    if (!/\.zip$/i.test(file)) continue;
+    let zbuf, entries;
+    try { zbuf = readFileSync(file); entries = readZipEntries(zbuf); }
+    catch (e) { stats.errors.push([file, `zip: ${e.message.slice(0, 60)}`]); continue; }
+    for (const entry of entries)
+      if (isPresetName(entry.name) && !entry.name.includes('__MACOSX'))
+        candidates.push({ file: `${file}::${entry.name}`, zip: { path: file, entry } });
+  }
+  if (jsonOut) console.log(JSON.stringify({ type: 'start', totalFiles: candidates.length }));
+
   db.exec('BEGIN');
-  for (const file of walk(root)) {
-    if (!/\.(hlx|hsp)(\s+copy)?$/i.test(file) && !/[\\/](U2 40|Purple|PRS Archon|Cougar ATT 15)$/.test(file)) continue;
+  let zipCache = { path: null, buf: null }; // i candidati dello stesso zip sono contigui
+  for (const { file, zip } of candidates) {
     stats.files++;
-    if (jsonOut && stats.files % 200 === 0)
+    if (jsonOut && stats.files % 100 === 0)
       console.log(JSON.stringify({ type: 'progress', files: stats.files, presets: stats.presets }));
     let buf;
-    try { buf = readFileSync(file); } catch (e) { stats.errors.push([file, 'read']); continue; }
+    try {
+      if (zip) {
+        if (zipCache.path !== zip.path) zipCache = { path: zip.path, buf: readFileSync(zip.path) };
+        buf = zipEntryData(zipCache.buf, zip.entry);
+      } else {
+        buf = readFileSync(file);
+      }
+    } catch (e) { stats.errors.push([file, 'read']); continue; }
     const fhash = createHash('sha256').update(buf).digest('hex');
     if (seenFile.has(fhash)) { stats.dupFile++; continue; }
     seenFile.set(fhash, file);
@@ -403,6 +463,10 @@ function main() {
       if (c.parentSetlist) stats.fromSetlists++;
       if (c.schema === 'HSP') stats.hsp++;
     }
+  }
+  if (jsonOut) {
+    console.log(JSON.stringify({ type: 'progress', files: stats.files, presets: stats.presets }));
+    console.log(JSON.stringify({ type: 'phase', phase: 'finalize' }));
   }
   db.exec('COMMIT');
   db.exec('INSERT INTO presets_fts(presets_fts) VALUES (\'optimize\')');

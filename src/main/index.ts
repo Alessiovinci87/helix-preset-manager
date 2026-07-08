@@ -11,8 +11,8 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { existsSync, writeFileSync } from 'node:fs'
 import { openDb, getStats, search, show, isOpen, getSourceFile, getPresetFileInfo } from './db'
-import { extractFromSetlist } from './extract'
-import type { ImportResult, SearchRequest } from '../shared/types'
+import { materializePreset, physicalPath, sourceExists } from './extract'
+import type { ImportProgress, ImportResult, SearchRequest } from '../shared/types'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -46,6 +46,10 @@ function runIngest(root: string, dbPath: string, sender: Electron.WebContents): 
     let done: ImportResult | null = null
     let buf = ''
     let errBuf = ''
+    const last: ImportProgress = { files: 0, presets: 0 }
+    const emit = () => {
+      if (!sender.isDestroyed()) sender.send('import:progress', { ...last })
+    }
     child.stdout?.on('data', (d: Buffer) => {
       buf += d.toString()
       let nl: number
@@ -55,9 +59,19 @@ function runIngest(root: string, dbPath: string, sender: Electron.WebContents): 
         if (!line.startsWith('{')) continue
         try {
           const msg = JSON.parse(line)
-          if (msg.type === 'progress' && !sender.isDestroyed())
-            sender.send('import:progress', { files: msg.files, presets: msg.presets })
-          if (msg.type === 'done') done = msg as ImportResult
+          if (msg.type === 'start') {
+            last.totalFiles = msg.totalFiles
+            emit()
+          } else if (msg.type === 'progress') {
+            last.files = msg.files
+            last.presets = msg.presets
+            emit()
+          } else if (msg.type === 'phase') {
+            last.phase = msg.phase
+            emit()
+          } else if (msg.type === 'done') {
+            done = msg as ImportResult
+          }
         } catch {
           /* riga non JSON, ignora */
         }
@@ -102,14 +116,16 @@ function createWindow(): void {
   }
 
   // HELIX_CAPTURE=<file.png>: screenshot della finestra e uscita (verifiche automatiche)
+  // HELIX_CAPTURE_DELAY=<ms>: attesa prima dello scatto (default 2500)
   const capturePath = process.env.HELIX_CAPTURE
   if (capturePath) {
+    const delay = Number(process.env.HELIX_CAPTURE_DELAY) || 2500
     win.webContents.once('did-finish-load', () => {
       setTimeout(async () => {
         const img = await win.webContents.capturePage()
         writeFileSync(capturePath, img.toPNG())
         app.quit()
-      }, 2500)
+      }, delay)
     })
   }
 }
@@ -126,15 +142,25 @@ app.whenReady().then(() => {
   )
   ipcMain.handle('db:show', (_e, id: number) => (isOpen() ? show(id) : null))
 
-  ipcMain.handle('import:folder', async (e) => {
+  ipcMain.handle('import:folder', async (e, mode: 'folder' | 'zip' = 'folder') => {
     if (importing) return null
     const win = BrowserWindow.fromWebContents(e.sender)
     if (!win) return null
-    const res = await dialog.showOpenDialog(win, {
-      title: 'Scegli la cartella dei preset',
-      buttonLabel: 'Importa',
-      properties: ['openDirectory'],
-    })
+    const res = await dialog.showOpenDialog(
+      win,
+      mode === 'zip'
+        ? {
+            title: 'Scegli un archivio ZIP di preset',
+            buttonLabel: 'Importa',
+            properties: ['openFile'],
+            filters: [{ name: 'Archivi ZIP', extensions: ['zip'] }],
+          }
+        : {
+            title: 'Scegli la cartella dei preset',
+            buttonLabel: 'Importa',
+            properties: ['openDirectory'],
+          },
+    )
     if (res.canceled || !res.filePaths[0]) return null
 
     importing = true
@@ -152,34 +178,34 @@ app.whenReady().then(() => {
   const notice = (e: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent, msg: string) =>
     e.sender.send('app:notice', msg)
 
-  /** File .hlx utilizzabile per il preset: il sorgente, o l'estratto dalla setlist. */
+  /** File .hlx utilizzabile per il preset: sorgente, o estratto da setlist/ZIP. */
   const usableFile = (
     e: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent,
     id: number,
   ): string | null => {
     const info = getPresetFileInfo(id)
     if (!info) return null
-    if (!existsSync(info.file)) {
+    if (!sourceExists(info.file)) {
       notice(
         e,
-        `File non trovato sul disco: ${info.file}. ` +
+        `File non trovato sul disco: ${physicalPath(info.file)}. ` +
           'Se hai spostato la cartella dei preset, re-importala per aggiornare la libreria.',
       )
       return null
     }
-    if (info.parentSetlist == null) return info.file
     try {
-      return extractFromSetlist(info.file, info.slot ?? 0, id, info.name)
+      return materializePreset(info, id)
     } catch (err) {
-      notice(e, `Estrazione dalla setlist fallita: ${(err as Error).message}`)
+      notice(e, `Estrazione del preset fallita: ${(err as Error).message}`)
       return null
     }
   }
 
   ipcMain.handle('preset:reveal', (e, id: number) => {
     const file = getSourceFile(id)
-    if (file && existsSync(file)) shell.showItemInFolder(file)
-    else notice(e, `File non trovato sul disco: ${file ?? `preset #${id}`}`)
+    const phys = file ? physicalPath(file) : null
+    if (phys && existsSync(phys)) shell.showItemInFolder(phys)
+    else notice(e, `File non trovato sul disco: ${phys ?? `preset #${id}`}`)
   })
 
   ipcMain.on('preset:drag', (e, id: number) => {

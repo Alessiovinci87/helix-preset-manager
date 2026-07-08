@@ -70,6 +70,10 @@ export interface SearchResponse {
 export interface ImportProgress {
   files: number
   presets: number
+  /** totale file da processare (noto dopo la scansione iniziale) */
+  totalFiles?: number
+  /** 'finalize' = scrittura/ottimizzazione indice in corso */
+  phase?: 'finalize'
 }
 
 export interface ImportResult {
@@ -89,8 +93,8 @@ export interface HelixApi {
   stats: () => Promise<LibraryStats | null>
   search: (req: SearchRequest) => Promise<SearchResponse>
   show: (id: number) => Promise<PresetDetail | null>
-  /** apre il dialog di scelta cartella e lancia l'ingestione; null se annullato */
-  importFolder: () => Promise<ImportResult | null>
+  /** apre il dialog di scelta (cartella o archivio ZIP) e lancia l'ingestione; null se annullato */
+  importFolder: (mode?: 'folder' | 'zip') => Promise<ImportResult | null>
   /** sottoscrive il progresso dell'import; ritorna la funzione di unsubscribe */
   onImportProgress: (cb: (p: ImportProgress) => void) => () => void
   /** mostra il file sorgente del preset in Esplora risorse */
