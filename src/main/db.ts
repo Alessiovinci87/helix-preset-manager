@@ -108,11 +108,18 @@ export function getStats(): LibraryStats {
          WHERE model LIKE 'HD2_Cab%' GROUP BY model ORDER BY c DESC`,
       )
       .all() as { m: string; c: number }[]
-  ).map((r) => ({ cab: r.m, label: prettyCab(r.m), count: r.c }))
+  )
+    .map((r) => ({ cab: r.m, label: prettyCab(r.m), count: r.c }))
+    .sort((a, b) => a.label.localeCompare(b.label, 'it', { sensitivity: 'base', numeric: true }))
   const irCount = (
     d.prepare('SELECT COUNT(*) c FROM presets WHERE uses_ir = 1').get() as { c: number }
   ).c
   const sorted = (m: Map<string, number>) => [...m.entries()].sort((a, b) => b[1] - a[1])
+  // per i dropdown: ordine alfabetico (i "top" restano per frequenza)
+  const alpha = (m: Map<string, number>) =>
+    [...m.entries()].sort((a, b) =>
+      a[0].localeCompare(b[0], 'it', { sensitivity: 'base', numeric: true }),
+    )
 
   return {
     total,
@@ -120,23 +127,24 @@ export function getStats(): LibraryStats {
     byGain,
     topBrands: sorted(brandCounts).slice(0, 10).map(([brand, count]) => ({ brand, count })),
     topArtists: sorted(artistCounts).slice(0, 10).map(([artist, count]) => ({ artist, count })),
-    brands: sorted(brandCounts).map(([brand, count]) => ({ brand, count })),
-    fxs: sorted(fxCounts).map(([fx, count]) => ({ fx, count })),
-    amps: sorted(ampCounts).map(([amp, count]) => ({ amp, count })),
+    brands: alpha(brandCounts).map(([brand, count]) => ({ brand, count })),
+    fxs: alpha(fxCounts).map(([fx, count]) => ({ fx, count })),
+    amps: alpha(ampCounts).map(([amp, count]) => ({ amp, count })),
     cabs,
     irCount,
   }
 }
 
-/** "HD2_Cab4x12Greenback25" → "4x12 Greenback25", "HD2_CabMicIr_…WithPan" → "… (dual mic)" */
+/** "HD2_Cab4x12Greenback25" → "4x12 Greenback25"; varianti MicIr/WithPan distinte nel suffisso */
 function prettyCab(model: string): string {
   const dualMic = /^HD2_CabMicIr_/.test(model)
+  const withPan = /WithPan$/.test(model)
   const name = model
     .replace(/^HD2_Cab(MicIr_)?/, '')
     .replace(/WithPan$/, '')
     .replace(/(\d)([A-Z])/g, '$1 $2')
     .replace(/([a-z])([A-Z])/g, '$1 $2')
-  return dualMic ? `${name} (dual mic)` : name
+  return dualMic ? `${name} (dual mic${withPan ? ' + pan' : ''})` : name
 }
 
 /** Costruisce la MATCH expression FTS5 con prefix matching per token. */

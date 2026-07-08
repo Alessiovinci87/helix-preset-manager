@@ -1,6 +1,6 @@
 {
   "name": "helix-preset-manager",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Preset manager for Line 6 Helix — organize, search and filter your own preset library. Not affiliated with Line 6 or Yamaha.",
   "private": true,
   "type": "module",
