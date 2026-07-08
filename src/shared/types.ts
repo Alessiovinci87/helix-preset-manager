@@ -87,6 +87,8 @@ export interface HelixApi {
   reveal: (id: number) => Promise<void>
   /** avvia il drag nativo del file .hlx (da rilasciare in HX Edit) */
   startDrag: (id: number) => void
+  /** apre il .hlx in HX Edit tramite l'associazione file di sistema */
+  openInHxEdit: (id: number) => Promise<void>
   /** avvisi dal main process (es. file sorgente non trovato) */
   onNotice: (cb: (msg: string) => void) => () => void
 }

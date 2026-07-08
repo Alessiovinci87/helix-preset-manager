@@ -39,12 +39,19 @@ function PresetRow({
   return (
     <button
       onClick={onClick}
+      onDoubleClick={() => {
+        if (!p.parentSetlist) window.api.openInHxEdit(p.id)
+      }}
       draggable={!p.parentSetlist}
       onDragStart={(e) => {
         e.preventDefault()
         if (!p.parentSetlist) window.api.startDrag(p.id)
       }}
-      title={p.parentSetlist ? undefined : 'Trascina il file .hlx in HX Edit per caricarlo'}
+      title={
+        p.parentSetlist
+          ? undefined
+          : 'Doppio click: apri in HX Edit — oppure trascina il file dentro HX Edit'
+      }
       className={`grid w-full grid-cols-[1fr_90px_150px_1fr] items-center gap-3 border-b border-zinc-800/60 px-4 py-2 text-left text-sm hover:bg-zinc-800/40 ${
         selected ? 'bg-zinc-800/60' : ''
       }`}
@@ -145,7 +152,16 @@ function DetailPanel({ detail, onClose }: { detail: PresetDetail; onClose: () =>
       </ol>
 
       <div className="mt-auto space-y-2 border-t border-zinc-800 p-4">
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          {!detail.parentSetlist && (
+            <button
+              onClick={() => window.api.openInHxEdit(detail.id)}
+              className="rounded bg-sky-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-600"
+              title="Apre il file .hlx con HX Edit (associazione di sistema)"
+            >
+              ▶ Apri in HX Edit
+            </button>
+          )}
           <button
             onClick={() => window.api.reveal(detail.id)}
             className="rounded border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:border-zinc-500 hover:text-zinc-100"

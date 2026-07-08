@@ -13,6 +13,7 @@ const api: HelixApi = {
   },
   reveal: (id: number) => ipcRenderer.invoke('preset:reveal', id),
   startDrag: (id: number) => ipcRenderer.send('preset:drag', id),
+  openInHxEdit: (id: number) => ipcRenderer.invoke('preset:open', id),
   onNotice: (cb: (msg: string) => void) => {
     const listener = (_e: Electron.IpcRendererEvent, msg: string) => cb(msg)
     ipcRenderer.on('app:notice', listener)

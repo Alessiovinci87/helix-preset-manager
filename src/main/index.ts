@@ -165,6 +165,13 @@ app.whenReady().then(() => {
     if (file) e.sender.startDrag({ file, icon: DRAG_ICON })
   })
 
+  ipcMain.handle('preset:open', async (e, id: number) => {
+    const file = fileOrNotice(e, id)
+    if (!file) return
+    const err = await shell.openPath(file) // usa l'associazione .hlx → HX Edit
+    if (err) e.sender.send('app:notice', `Impossibile aprire il file in HX Edit: ${err}`)
+  })
+
   createWindow()
 
   // HELIX_IMPORT=<cartella>: import automatico all'avvio (verifiche automatiche)
