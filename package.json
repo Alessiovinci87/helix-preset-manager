@@ -1,6 +1,6 @@
 {
   "name": "helix-preset-manager",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Preset manager for Line 6 Helix — organize, search and filter your own preset library. Not affiliated with Line 6 or Yamaha.",
   "private": true,
   "type": "module",
@@ -11,7 +11,31 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "dist": "electron-vite build && electron-builder --win nsis"
+  },
+  "build": {
+    "appId": "com.alessiovinci.helix-preset-manager",
+    "productName": "Helix Preset Manager",
+    "files": [
+      "out/**",
+      "core/**",
+      "package.json",
+      "!**/*.db",
+      "!**/*.hlx",
+      "!**/*.hsp"
+    ],
+    "asarUnpack": [
+      "core/**"
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": true,
+      "deleteAppDataOnUninstall": false,
+      "artifactName": "HelixPresetManager-Setup-${version}.${ext}"
+    }
   },
   "dependencies": {
     "react": "^19.1.0",
@@ -24,6 +48,7 @@
     "@types/react-dom": "^19.1.0",
     "@vitejs/plugin-react": "^4.5.0",
     "electron": "^38.0.0",
+    "electron-builder": "^26.15.3",
     "electron-vite": "^4.0.0",
     "tailwindcss": "^4.1.0",
     "typescript": "^5.8.0",
@@ -32,6 +57,7 @@
   "allowScripts": {
     "electron@38.8.6": true,
     "esbuild@0.25.12": true,
-    "esbuild@0.28.1": true
+    "esbuild@0.28.1": true,
+    "electron-winstaller@5.4.0": true
   }
 }

@@ -33,7 +33,11 @@ const DRAG_ICON = nativeImage.createFromDataURL(
 )
 
 function runIngest(root: string, dbPath: string, sender: Electron.WebContents): Promise<ImportResult> {
-  const script = join(app.getAppPath(), 'core', 'ingest.mjs')
+  // nell'app impacchettata core/ è fuori dall'asar (asarUnpack)
+  const script = join(app.getAppPath(), 'core', 'ingest.mjs').replace(
+    'app.asar',
+    'app.asar.unpacked',
+  )
   return new Promise((resolve, reject) => {
     const child = utilityProcess.fork(script, [root, dbPath], {
       stdio: 'pipe',
