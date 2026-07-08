@@ -57,9 +57,34 @@ export interface SearchResponse {
   total: number
 }
 
+export interface ImportProgress {
+  files: number
+  presets: number
+}
+
+export interface ImportResult {
+  seconds: number
+  files: number
+  presets: number
+  fromSetlists: number
+  hsp: number
+  dupFile: number
+  dupContent: number
+  errors: number
+}
+
 // Canale IPC → firma
 export interface HelixApi {
-  stats: () => Promise<LibraryStats>
+  /** null se non esiste ancora nessuna libreria (primo avvio) */
+  stats: () => Promise<LibraryStats | null>
   search: (req: SearchRequest) => Promise<SearchResponse>
   show: (id: number) => Promise<PresetDetail | null>
+  /** apre il dialog di scelta cartella e lancia l'ingestione; null se annullato */
+  importFolder: () => Promise<ImportResult | null>
+  /** sottoscrive il progresso dell'import; ritorna la funzione di unsubscribe */
+  onImportProgress: (cb: (p: ImportProgress) => void) => () => void
+  /** mostra il file sorgente del preset in Esplora risorse */
+  reveal: (id: number) => Promise<void>
+  /** avvia il drag nativo del file .hlx (da rilasciare in HX Edit) */
+  startDrag: (id: number) => void
 }

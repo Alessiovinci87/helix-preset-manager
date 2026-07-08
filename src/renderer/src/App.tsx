@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { LibraryStats, PresetDetail, PresetSummary } from '../../shared/types'
+import type {
+  ImportProgress,
+  LibraryStats,
+  PresetDetail,
+  PresetSummary,
+} from '../../shared/types'
 
 const GAIN_COLORS: Record<string, string> = {
   clean: 'bg-sky-500/15 text-sky-400',
@@ -34,6 +39,12 @@ function PresetRow({
   return (
     <button
       onClick={onClick}
+      draggable={!p.parentSetlist}
+      onDragStart={(e) => {
+        e.preventDefault()
+        if (!p.parentSetlist) window.api.startDrag(p.id)
+      }}
+      title={p.parentSetlist ? undefined : 'Trascina il file .hlx in HX Edit per caricarlo'}
       className={`grid w-full grid-cols-[1fr_90px_150px_1fr] items-center gap-3 border-b border-zinc-800/60 px-4 py-2 text-left text-sm hover:bg-zinc-800/40 ${
         selected ? 'bg-zinc-800/60' : ''
       }`}
@@ -133,9 +144,38 @@ function DetailPanel({ detail, onClose }: { detail: PresetDetail; onClose: () =>
         ))}
       </ol>
 
-      <p className="mt-auto truncate px-4 pb-3 text-[10px] text-zinc-600" title={detail.sourceFile}>
-        {detail.sourceFile}
-      </p>
+      <div className="mt-auto space-y-2 border-t border-zinc-800 p-4">
+        <div className="flex gap-2">
+          <button
+            onClick={() => window.api.reveal(detail.id)}
+            className="rounded border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:border-zinc-500 hover:text-zinc-100"
+          >
+            Mostra in Esplora risorse
+          </button>
+          {!detail.parentSetlist && (
+            <span
+              draggable
+              onDragStart={(e) => {
+                e.preventDefault()
+                window.api.startDrag(detail.id)
+              }}
+              className="cursor-grab rounded border border-sky-800 bg-sky-950/40 px-3 py-1.5 text-xs text-sky-300 select-none active:cursor-grabbing"
+              title="Tieni premuto e trascina dentro HX Edit"
+            >
+              ⠿ Trascina in HX Edit
+            </span>
+          )}
+        </div>
+        {detail.parentSetlist && (
+          <p className="text-[11px] leading-snug text-zinc-500">
+            Questo preset vive dentro la setlist "{detail.parentSetlist}": per usarlo in HX Edit
+            importa il file setlist (l'estrazione del singolo .hlx arriva con la v2.0).
+          </p>
+        )}
+        <p className="truncate text-[10px] text-zinc-600" title={detail.sourceFile}>
+          {detail.sourceFile}
+        </p>
+      </div>
     </aside>
   )
 }
@@ -148,6 +188,8 @@ export default function App() {
   const [noDup, setNoDup] = useState(true)
   const [detail, setDetail] = useState<PresetDetail | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [importing, setImporting] = useState(false)
+  const [progress, setProgress] = useState<ImportProgress | null>(null)
   const seq = useRef(0)
 
   useEffect(() => {
@@ -156,6 +198,27 @@ export default function App() {
       .then(setStats)
       .catch((e) => setError(String(e)))
   }, [])
+
+  useEffect(() => window.api.onImportProgress(setProgress), [])
+
+  const doImport = useCallback(() => {
+    setImporting(true)
+    setProgress(null)
+    setError(null)
+    window.api
+      .importFolder()
+      .then((res) => {
+        if (!res) return // annullato
+        window.api.stats().then(setStats)
+        runSearch(query, noDup)
+        setProgress(null)
+        if (res.errors > 0)
+          setError(`Import completato con ${res.errors} file non riconosciuti`)
+      })
+      .catch((e) => setError(String(e)))
+      .finally(() => setImporting(false))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query, noDup])
 
   const runSearch = useCallback((q: string, nd: boolean) => {
     const mySeq = ++seq.current
@@ -202,11 +265,27 @@ export default function App() {
           />
           nascondi duplicati
         </label>
-        {stats && (
-          <span className="ml-auto text-xs whitespace-nowrap text-zinc-500">
-            {stats.unique.toLocaleString('it-IT')} preset unici
-          </span>
-        )}
+        <div className="ml-auto flex items-center gap-3">
+          {importing && (
+            <span className="text-xs whitespace-nowrap text-amber-400">
+              {progress
+                ? `Importazione… ${progress.files.toLocaleString('it-IT')} file, ${progress.presets.toLocaleString('it-IT')} preset`
+                : 'Importazione…'}
+            </span>
+          )}
+          {!importing && stats && (
+            <span className="text-xs whitespace-nowrap text-zinc-500">
+              {stats.unique.toLocaleString('it-IT')} preset unici
+            </span>
+          )}
+          <button
+            onClick={doImport}
+            disabled={importing}
+            className="rounded-md bg-sky-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-600 disabled:opacity-50"
+          >
+            Importa cartella…
+          </button>
+        </div>
       </header>
 
       {error && (
@@ -232,9 +311,27 @@ export default function App() {
                 onClick={() => openDetail(p.id)}
               />
             ))}
-            {rows.length === 0 && (
-              <p className="p-8 text-center text-sm text-zinc-600">Nessun risultato</p>
-            )}
+            {rows.length === 0 &&
+              (stats === null && !query ? (
+                <div className="flex flex-col items-center gap-4 p-16 text-center">
+                  <p className="text-lg font-medium text-zinc-300">
+                    La tua libreria è ancora vuota
+                  </p>
+                  <p className="max-w-md text-sm text-zinc-500">
+                    Importa la cartella dove tieni i tuoi preset (.hlx, setlist, .hsp): verranno
+                    indicizzati, classificati e deduplicati. I file originali non vengono toccati.
+                  </p>
+                  <button
+                    onClick={doImport}
+                    disabled={importing}
+                    className="rounded-md bg-sky-700 px-4 py-2 text-sm font-medium text-white hover:bg-sky-600 disabled:opacity-50"
+                  >
+                    Importa cartella…
+                  </button>
+                </div>
+              ) : (
+                <p className="p-8 text-center text-sm text-zinc-600">Nessun risultato</p>
+              ))}
           </div>
           <footer className="border-t border-zinc-800 px-4 py-1.5 text-xs text-zinc-600">
             {total.toLocaleString('it-IT')} risultati

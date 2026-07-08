@@ -1,11 +1,21 @@
-import { app, BrowserWindow, ipcMain, shell } from 'electron'
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  nativeImage,
+  shell,
+  utilityProcess,
+} from 'electron'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { existsSync, writeFileSync } from 'node:fs'
-import { openDb, getStats, search, show } from './db'
-import type { SearchRequest } from '../shared/types'
+import { openDb, getStats, search, show, isOpen, getSourceFile } from './db'
+import type { ImportResult, SearchRequest } from '../shared/types'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
+
+let currentDbPath: string | null = null
 
 function resolveDbPath(): string | null {
   const candidates = [
@@ -14,6 +24,48 @@ function resolveDbPath(): string | null {
     join(app.getPath('userData'), 'helix.db'),
   ].filter(Boolean) as string[]
   return candidates.find((p) => existsSync(p)) ?? null
+}
+
+// icona 1x1 trasparente per il drag nativo (Windows la richiede)
+const DRAG_ICON = nativeImage.createFromDataURL(
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+)
+
+function runIngest(root: string, dbPath: string, sender: Electron.WebContents): Promise<ImportResult> {
+  const script = join(app.getAppPath(), 'core', 'ingest.mjs')
+  return new Promise((resolve, reject) => {
+    const child = utilityProcess.fork(script, [root, dbPath], {
+      stdio: 'pipe',
+      env: { ...process.env, HELIX_JSON: '1' },
+    })
+    let done: ImportResult | null = null
+    let buf = ''
+    let errBuf = ''
+    child.stdout?.on('data', (d: Buffer) => {
+      buf += d.toString()
+      let nl: number
+      while ((nl = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, nl).trim()
+        buf = buf.slice(nl + 1)
+        if (!line.startsWith('{')) continue
+        try {
+          const msg = JSON.parse(line)
+          if (msg.type === 'progress' && !sender.isDestroyed())
+            sender.send('import:progress', { files: msg.files, presets: msg.presets })
+          if (msg.type === 'done') done = msg as ImportResult
+        } catch {
+          /* riga non JSON, ignora */
+        }
+      }
+    })
+    child.stderr?.on('data', (d: Buffer) => {
+      errBuf += d.toString()
+    })
+    child.on('exit', (code) => {
+      if (code === 0 && done) resolve(done)
+      else reject(new Error(`Import fallito (exit ${code}): ${errBuf.slice(0, 300)}`))
+    })
+  })
 }
 
 function createWindow(): void {
@@ -57,15 +109,65 @@ function createWindow(): void {
   }
 }
 
-app.whenReady().then(() => {
-  const dbPath = resolveDbPath()
-  if (dbPath) openDb(dbPath)
+let importing = false
 
-  ipcMain.handle('db:stats', () => getStats())
-  ipcMain.handle('db:search', (_e, req: SearchRequest) => search(req))
-  ipcMain.handle('db:show', (_e, id: number) => show(id))
+app.whenReady().then(() => {
+  currentDbPath = resolveDbPath()
+  if (currentDbPath) openDb(currentDbPath)
+
+  ipcMain.handle('db:stats', () => (isOpen() ? getStats() : null))
+  ipcMain.handle('db:search', (_e, req: SearchRequest) =>
+    isOpen() ? search(req) : { rows: [], total: 0 },
+  )
+  ipcMain.handle('db:show', (_e, id: number) => (isOpen() ? show(id) : null))
+
+  ipcMain.handle('import:folder', async (e) => {
+    if (importing) return null
+    const win = BrowserWindow.fromWebContents(e.sender)
+    if (!win) return null
+    const res = await dialog.showOpenDialog(win, {
+      title: 'Scegli la cartella dei preset',
+      buttonLabel: 'Importa',
+      properties: ['openDirectory'],
+    })
+    if (res.canceled || !res.filePaths[0]) return null
+
+    importing = true
+    try {
+      const dbPath = currentDbPath ?? join(app.getPath('userData'), 'helix.db')
+      const result = await runIngest(res.filePaths[0], dbPath, e.sender)
+      if (!isOpen()) openDb(dbPath)
+      currentDbPath = dbPath
+      return result
+    } finally {
+      importing = false
+    }
+  })
+
+  ipcMain.handle('preset:reveal', (_e, id: number) => {
+    const file = getSourceFile(id)
+    if (file && existsSync(file)) shell.showItemInFolder(file)
+  })
+
+  ipcMain.on('preset:drag', (e, id: number) => {
+    const file = getSourceFile(id)
+    if (file && existsSync(file)) e.sender.startDrag({ file, icon: DRAG_ICON })
+  })
 
   createWindow()
+
+  // HELIX_IMPORT=<cartella>: import automatico all'avvio (verifiche automatiche)
+  if (process.env.HELIX_IMPORT) {
+    const win = BrowserWindow.getAllWindows()[0]
+    const dbPath = currentDbPath ?? join(app.getPath('userData'), 'helix.db')
+    runIngest(process.env.HELIX_IMPORT, dbPath, win.webContents)
+      .then((r) => {
+        if (!isOpen()) openDb(dbPath)
+        currentDbPath = dbPath
+        console.log('AUTO-IMPORT OK', JSON.stringify(r))
+      })
+      .catch((err) => console.error('AUTO-IMPORT FAIL', err))
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

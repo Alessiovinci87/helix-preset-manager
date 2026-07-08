@@ -10,7 +10,9 @@ Desktop app Windows (Electron + React) per organizzare, cercare e filtrare libre
 
 - ✅ **Spike v0.1 completato e testato**: `core/ingest.mjs` (motore ingestione) + `core/query.mjs` (CLI query). Zero dipendenze, solo Node ≥ 22.5 (`node:sqlite` nativo con FTS5).
 - Testato su corpus reale: 15.513 preset da 11.080 file in ~19s, 0 errori di parsing.
-- 🔜 **Prossimo obiettivo: v1.0** — guscio Electron + React + Vite + Tailwind attorno al motore esistente.
+- ✅ **v1.0 in corso** — shell Electron + React + Vite + Tailwind funzionante: library view con FTS while-typing, scheda preset con catena effetti, import cartella dalla UI (ingestione idempotente in `utilityProcess`, progresso live), drag-out del .hlx verso HX Edit, mostra-in-Esplora. `node:sqlite` funziona dentro Electron 38 (solo warning experimental, niente better-sqlite3).
+- Hook di verifica automatica nel main process: `HELIX_CAPTURE=<png>` (screenshot e quit), `HELIX_IMPORT=<cartella>` (import all'avvio senza dialog), `HELIX_DB=<db>` (override percorso DB).
+- 🔜 Manca per chiudere la v1.0: lista virtualizzata (ora primi 200 risultati), sidebar filtri con conteggi, import ZIP drag&drop, preferiti/tag/note.
 
 ## Fatti tecnici chiave sui formati (verificati sul corpus reale)
 

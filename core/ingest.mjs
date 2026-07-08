@@ -316,6 +316,8 @@ function main() {
   const root = process.argv[2];
   const dbPath = process.argv[3] || 'helix.db';
   if (!root) { console.error('Uso: node ingest.mjs <cartella> [db]'); process.exit(1); }
+  // HELIX_JSON=1: stdout solo righe JSON (progress/done) per l'app Electron
+  const jsonOut = process.env.HELIX_JSON === '1';
 
   const t0 = Date.now();
   const db = initDb(dbPath);
@@ -333,10 +335,20 @@ function main() {
   const stats = { files: 0, presets: 0, fromSetlists: 0, hsp: 0, dupFile: 0, dupContent: 0, errors: [] };
   const seenFile = new Map(), seenContent = new Map();
 
+  // re-import idempotente: riparti dagli hash già presenti nel DB
+  try {
+    for (const r of db.prepare('SELECT id, file_hash, content_hash, dup_of FROM presets').all()) {
+      if (!seenFile.has(r.file_hash)) seenFile.set(r.file_hash, '(già in DB)');
+      if (r.dup_of == null && !seenContent.has(r.content_hash)) seenContent.set(r.content_hash, r.id);
+    }
+  } catch { /* DB nuovo, nessuno stato precedente */ }
+
   db.exec('BEGIN');
   for (const file of walk(root)) {
     if (!/\.(hlx|hsp)(\s+copy)?$/i.test(file) && !/\/(U2 40|Purple|PRS Archon|Cougar ATT 15)$/.test(file)) continue;
     stats.files++;
+    if (jsonOut && stats.files % 200 === 0)
+      console.log(JSON.stringify({ type: 'progress', files: stats.files, presets: stats.presets }));
     let buf;
     try { buf = readFileSync(file); } catch (e) { stats.errors.push([file, 'read']); continue; }
     const fhash = createHash('sha256').update(buf).digest('hex');
@@ -396,6 +408,14 @@ function main() {
   db.exec('INSERT INTO presets_fts(presets_fts) VALUES (\'optimize\')');
 
   const dt = ((Date.now() - t0) / 1000).toFixed(1);
+  if (jsonOut) {
+    console.log(JSON.stringify({
+      type: 'done', seconds: +dt, files: stats.files, presets: stats.presets,
+      fromSetlists: stats.fromSetlists, hsp: stats.hsp,
+      dupFile: stats.dupFile, dupContent: stats.dupContent, errors: stats.errors.length,
+    }));
+    return;
+  }
   console.log(`\n── Ingestione completata in ${dt}s ──`);
   console.log(`File analizzati:        ${stats.files}`);
   console.log(`Preset indicizzati:     ${stats.presets}`);

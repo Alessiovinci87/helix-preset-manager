@@ -18,6 +18,15 @@ function need(): DatabaseSync {
   return db
 }
 
+export const isOpen = (): boolean => db !== null
+
+export function getSourceFile(id: number): string | null {
+  const r = need().prepare('SELECT source_file f FROM presets WHERE id = ?').get(id) as
+    | { f: string }
+    | undefined
+  return r?.f ?? null
+}
+
 const parseJson = <T>(s: string | null, fallback: T): T => {
   if (!s) return fallback
   try {
