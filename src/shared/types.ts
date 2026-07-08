@@ -6,6 +6,10 @@ export interface LibraryStats {
   byGain: { gainClass: string; count: number }[]
   topBrands: { brand: string; count: number }[]
   topArtists: { artist: string; count: number }[]
+  /** tutte le marche amp, ordinate per frequenza */
+  brands: { brand: string; count: number }[]
+  /** tutte le categorie effetti, ordinate per frequenza */
+  fxs: { fx: string; count: number }[]
 }
 
 export interface PresetSummary {
@@ -51,6 +55,10 @@ export interface SearchRequest {
   noDup?: boolean
   /** filtra per classi di gain (clean, crunch, …); vuoto/assente = tutte */
   gains?: string[]
+  /** filtra per marca amp esatta (es. Fender) */
+  brand?: string
+  /** filtra per categoria effetto (es. delay) */
+  fx?: string
 }
 
 export interface SearchResponse {

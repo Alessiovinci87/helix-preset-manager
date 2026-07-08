@@ -27,6 +27,23 @@ export function getSourceFile(id: number): string | null {
   return r?.f ?? null
 }
 
+export interface PresetFileInfo {
+  file: string
+  slot: number | null
+  parentSetlist: string | null
+  name: string
+}
+
+export function getPresetFileInfo(id: number): PresetFileInfo | null {
+  const r = need()
+    .prepare(
+      'SELECT source_file f, slot, parent_setlist p, name FROM presets WHERE id = ?',
+    )
+    .get(id) as { f: string; slot: number | null; p: string | null; name: string } | undefined
+  if (!r) return null
+  return { file: r.f, slot: r.slot, parentSetlist: r.p, name: r.name }
+}
+
 const parseJson = <T>(s: string | null, fallback: T): T => {
   if (!s) return fallback
   try {
@@ -70,23 +87,27 @@ export function getStats(): LibraryStats {
 
   const brandCounts = new Map<string, number>()
   const artistCounts = new Map<string, number>()
+  const fxCounts = new Map<string, number>()
   for (const r of d
-    .prepare("SELECT amp_brands, artists FROM presets")
-    .all() as { amp_brands: string; artists: string }[]) {
+    .prepare("SELECT amp_brands, artists, fx FROM presets")
+    .all() as { amp_brands: string; artists: string; fx: string }[]) {
     for (const b of parseJson<string[]>(r.amp_brands, []))
       brandCounts.set(b, (brandCounts.get(b) ?? 0) + 1)
     for (const a of parseJson<string[]>(r.artists, []))
       artistCounts.set(a, (artistCounts.get(a) ?? 0) + 1)
+    for (const f of parseJson<string[]>(r.fx, []))
+      fxCounts.set(f, (fxCounts.get(f) ?? 0) + 1)
   }
-  const top = (m: Map<string, number>, n: number) =>
-    [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, n)
+  const sorted = (m: Map<string, number>) => [...m.entries()].sort((a, b) => b[1] - a[1])
 
   return {
     total,
     unique,
     byGain,
-    topBrands: top(brandCounts, 10).map(([brand, count]) => ({ brand, count })),
-    topArtists: top(artistCounts, 10).map(([artist, count]) => ({ artist, count })),
+    topBrands: sorted(brandCounts).slice(0, 10).map(([brand, count]) => ({ brand, count })),
+    topArtists: sorted(artistCounts).slice(0, 10).map(([artist, count]) => ({ artist, count })),
+    brands: sorted(brandCounts).map(([brand, count]) => ({ brand, count })),
+    fxs: sorted(fxCounts).map(([fx, count]) => ({ fx, count })),
   }
 }
 
@@ -111,6 +132,14 @@ export function search(req: SearchRequest): SearchResponse {
   if (req.gains?.length) {
     conds.push(`p.gain_class IN (${req.gains.map(() => '?').join(',')})`)
     params.push(...req.gains)
+  }
+  if (req.brand) {
+    conds.push('p.amp_brands LIKE ?')
+    params.push(`%${JSON.stringify(req.brand)}%`)
+  }
+  if (req.fx) {
+    conds.push('p.fx LIKE ?')
+    params.push(`%"${req.fx}"%`)
   }
 
   if (!q) {

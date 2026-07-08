@@ -10,9 +10,11 @@ Desktop app Windows (Electron + React) per organizzare, cercare e filtrare libre
 
 - ✅ **Spike v0.1 completato e testato**: `core/ingest.mjs` (motore ingestione) + `core/query.mjs` (CLI query). Zero dipendenze, solo Node ≥ 22.5 (`node:sqlite` nativo con FTS5).
 - Testato su corpus reale: 15.513 preset da 11.080 file in ~19s, 0 errori di parsing.
-- ✅ **v1.0 in corso** — shell Electron + React + Vite + Tailwind funzionante: library view con FTS while-typing, scheda preset con catena effetti, import cartella dalla UI (ingestione idempotente in `utilityProcess`, progresso live), drag-out del .hlx verso HX Edit, mostra-in-Esplora. `node:sqlite` funziona dentro Electron 38 (solo warning experimental, niente better-sqlite3).
+- ✅ **v1.0 in corso** — shell Electron + React + Vite + Tailwind funzionante: library view **virtualizzata a pagine** (tutti i risultati scorrevoli, fetch 200 per pagina con cache), FTS while-typing, filtri gain (chip) + marca + effetto, scheda preset con catena effetti, import cartella dalla UI (ingestione idempotente in `utilityProcess`, progresso live), apri-in-HX-Edit (doppio click, via associazione .hlx di sistema) e drag-out nativo. `node:sqlite` funziona dentro Electron 38 (solo warning experimental, niente better-sqlite3).
+- ✅ **Estrazione preset da setlist** (anticipata dalla v2.0): `src/main/extract.ts` materializza il singolo .hlx in temp (`{schema, version:6, meta, data}` — formato verificato con round-trip: content_hash identico dopo re-ingestione). Apri/trascina funzionano quindi su TUTTI i preset, anche quelli dentro le setlist.
 - Hook di verifica automatica nel main process: `HELIX_CAPTURE=<png>` (screenshot e quit), `HELIX_IMPORT=<cartella>` (import all'avvio senza dialog), `HELIX_DB=<db>` (override percorso DB).
-- 🔜 Manca per chiudere la v1.0: lista virtualizzata (ora primi 200 risultati), sidebar filtri con conteggi, import ZIP drag&drop, preferiti/tag/note.
+- ⚠️ Il DB dev'essere generato sulla macchina dell'utente: i `source_file` sono percorsi assoluti locali (un helix.db copiato da un'altra macchina rompe apri/trascina).
+- 🔜 Manca per chiudere la v1.0: import ZIP drag&drop, preferiti/tag/note/rating, i18n, packaging (electron-builder).
 
 ## Fatti tecnici chiave sui formati (verificati sul corpus reale)
 

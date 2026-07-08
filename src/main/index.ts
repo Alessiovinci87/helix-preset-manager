@@ -10,7 +10,8 @@ import {
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { existsSync, writeFileSync } from 'node:fs'
-import { openDb, getStats, search, show, isOpen, getSourceFile } from './db'
+import { openDb, getStats, search, show, isOpen, getSourceFile, getPresetFileInfo } from './db'
+import { extractFromSetlist } from './extract'
 import type { ImportResult, SearchRequest } from '../shared/types'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -144,32 +145,49 @@ app.whenReady().then(() => {
     }
   })
 
-  const fileOrNotice = (e: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent, id: number) => {
-    const file = getSourceFile(id)
-    if (file && existsSync(file)) return file
-    e.sender.send(
-      'app:notice',
-      `File non trovato sul disco: ${file ?? `preset #${id}`}. ` +
-        'Se hai spostato la cartella dei preset, re-importala per aggiornare la libreria.',
-    )
-    return null
+  const notice = (e: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent, msg: string) =>
+    e.sender.send('app:notice', msg)
+
+  /** File .hlx utilizzabile per il preset: il sorgente, o l'estratto dalla setlist. */
+  const usableFile = (
+    e: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent,
+    id: number,
+  ): string | null => {
+    const info = getPresetFileInfo(id)
+    if (!info) return null
+    if (!existsSync(info.file)) {
+      notice(
+        e,
+        `File non trovato sul disco: ${info.file}. ` +
+          'Se hai spostato la cartella dei preset, re-importala per aggiornare la libreria.',
+      )
+      return null
+    }
+    if (info.parentSetlist == null) return info.file
+    try {
+      return extractFromSetlist(info.file, info.slot ?? 0, id, info.name)
+    } catch (err) {
+      notice(e, `Estrazione dalla setlist fallita: ${(err as Error).message}`)
+      return null
+    }
   }
 
   ipcMain.handle('preset:reveal', (e, id: number) => {
-    const file = fileOrNotice(e, id)
-    if (file) shell.showItemInFolder(file)
+    const file = getSourceFile(id)
+    if (file && existsSync(file)) shell.showItemInFolder(file)
+    else notice(e, `File non trovato sul disco: ${file ?? `preset #${id}`}`)
   })
 
   ipcMain.on('preset:drag', (e, id: number) => {
-    const file = fileOrNotice(e, id)
+    const file = usableFile(e, id)
     if (file) e.sender.startDrag({ file, icon: DRAG_ICON })
   })
 
   ipcMain.handle('preset:open', async (e, id: number) => {
-    const file = fileOrNotice(e, id)
+    const file = usableFile(e, id)
     if (!file) return
     const err = await shell.openPath(file) // usa l'associazione .hlx → HX Edit
-    if (err) e.sender.send('app:notice', `Impossibile aprire il file in HX Edit: ${err}`)
+    if (err) notice(e, `Impossibile aprire il file in HX Edit: ${err}`)
   })
 
   createWindow()
