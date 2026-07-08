@@ -88,16 +88,30 @@ export function getStats(): LibraryStats {
   const brandCounts = new Map<string, number>()
   const artistCounts = new Map<string, number>()
   const fxCounts = new Map<string, number>()
+  const ampCounts = new Map<string, number>()
   for (const r of d
-    .prepare("SELECT amp_brands, artists, fx FROM presets")
-    .all() as { amp_brands: string; artists: string; fx: string }[]) {
+    .prepare("SELECT amp_brands, artists, fx, amp_models FROM presets")
+    .all() as { amp_brands: string; artists: string; fx: string; amp_models: string }[]) {
     for (const b of parseJson<string[]>(r.amp_brands, []))
       brandCounts.set(b, (brandCounts.get(b) ?? 0) + 1)
     for (const a of parseJson<string[]>(r.artists, []))
       artistCounts.set(a, (artistCounts.get(a) ?? 0) + 1)
     for (const f of parseJson<string[]>(r.fx, []))
       fxCounts.set(f, (fxCounts.get(f) ?? 0) + 1)
+    for (const m of new Set(parseJson<string[]>(r.amp_models, [])))
+      ampCounts.set(m, (ampCounts.get(m) ?? 0) + 1)
   }
+  const cabs = (
+    d
+      .prepare(
+        `SELECT model m, COUNT(DISTINCT preset_id) c FROM blocks
+         WHERE model LIKE 'HD2_Cab%' GROUP BY model ORDER BY c DESC`,
+      )
+      .all() as { m: string; c: number }[]
+  ).map((r) => ({ cab: r.m, label: prettyCab(r.m), count: r.c }))
+  const irCount = (
+    d.prepare('SELECT COUNT(*) c FROM presets WHERE uses_ir = 1').get() as { c: number }
+  ).c
   const sorted = (m: Map<string, number>) => [...m.entries()].sort((a, b) => b[1] - a[1])
 
   return {
@@ -108,7 +122,21 @@ export function getStats(): LibraryStats {
     topArtists: sorted(artistCounts).slice(0, 10).map(([artist, count]) => ({ artist, count })),
     brands: sorted(brandCounts).map(([brand, count]) => ({ brand, count })),
     fxs: sorted(fxCounts).map(([fx, count]) => ({ fx, count })),
+    amps: sorted(ampCounts).map(([amp, count]) => ({ amp, count })),
+    cabs,
+    irCount,
   }
+}
+
+/** "HD2_Cab4x12Greenback25" → "4x12 Greenback25", "HD2_CabMicIr_…WithPan" → "… (dual mic)" */
+function prettyCab(model: string): string {
+  const dualMic = /^HD2_CabMicIr_/.test(model)
+  const name = model
+    .replace(/^HD2_Cab(MicIr_)?/, '')
+    .replace(/WithPan$/, '')
+    .replace(/(\d)([A-Z])/g, '$1 $2')
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+  return dualMic ? `${name} (dual mic)` : name
 }
 
 /** Costruisce la MATCH expression FTS5 con prefix matching per token. */
@@ -141,6 +169,17 @@ export function search(req: SearchRequest): SearchResponse {
     conds.push('p.fx LIKE ?')
     params.push(`%"${req.fx}"%`)
   }
+  if (req.amp) {
+    conds.push('p.amp_models LIKE ?')
+    params.push(`%${JSON.stringify(req.amp)}%`)
+  }
+  if (req.cab) {
+    // IN non correlata: si materializza una volta sola via ix_blocks_model
+    // (una EXISTS correlata scansiona blocks per ogni preset: minuti sul corpus reale)
+    conds.push('p.id IN (SELECT preset_id FROM blocks WHERE model = ?)')
+    params.push(req.cab)
+  }
+  if (req.ir) conds.push('p.uses_ir = 1')
 
   if (!q) {
     const where = conds.length ? `WHERE ${conds.join(' AND ')}` : ''

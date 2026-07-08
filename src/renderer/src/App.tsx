@@ -199,6 +199,9 @@ export default function App() {
   const [gains, setGains] = useState<Set<string>>(new Set())
   const [brand, setBrand] = useState('')
   const [fx, setFx] = useState('')
+  const [amp, setAmp] = useState('')
+  const [cab, setCab] = useState('')
+  const [ir, setIr] = useState(false)
   const [total, setTotal] = useState(0)
   const [detail, setDetail] = useState<PresetDetail | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -228,6 +231,9 @@ export default function App() {
           gains: [...gains],
           brand: brand || undefined,
           fx: fx || undefined,
+          amp: amp || undefined,
+          cab: cab || undefined,
+          ir: ir || undefined,
         })
         .then((res) => {
           if (seq.current !== mySeq) return // risposta stantia
@@ -238,7 +244,7 @@ export default function App() {
         .catch((e) => setError(String(e)))
         .finally(() => inflight.current.delete(pi))
     },
-    [query, noDup, gains, brand, fx],
+    [query, noDup, gains, brand, fx, amp, cab, ir],
   )
 
   // reset e prima pagina quando cambiano i filtri (debounced)
@@ -429,6 +435,30 @@ export default function App() {
             ))}
           </select>
           <select
+            value={amp}
+            onChange={(e) => setAmp(e.target.value)}
+            className="max-w-44 rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-300 outline-none focus:border-sky-600"
+          >
+            <option value="">Ampli: tutti</option>
+            {stats.amps.map((a) => (
+              <option key={a.amp} value={a.amp}>
+                {a.amp} ({a.count.toLocaleString('it-IT')})
+              </option>
+            ))}
+          </select>
+          <select
+            value={cab}
+            onChange={(e) => setCab(e.target.value)}
+            className="max-w-44 rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-300 outline-none focus:border-sky-600"
+          >
+            <option value="">Cab: tutti</option>
+            {stats.cabs.map((c) => (
+              <option key={c.cab} value={c.cab}>
+                {c.label} ({c.count.toLocaleString('it-IT')})
+              </option>
+            ))}
+          </select>
+          <select
             value={fx}
             onChange={(e) => setFx(e.target.value)}
             className="rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-300 outline-none focus:border-sky-600"
@@ -442,12 +472,28 @@ export default function App() {
                 </option>
               ))}
           </select>
-          {(gains.size > 0 || brand || fx) && (
+          {stats.irCount > 0 && (
+            <button
+              onClick={() => setIr(!ir)}
+              title="Solo preset che usano un blocco IR (richiedono il file .wav nello slot indicato)"
+              className={`rounded-full border px-3 py-1 text-xs whitespace-nowrap select-none ${
+                ir
+                  ? 'border-transparent bg-fuchsia-500/15 text-fuchsia-400'
+                  : 'border-zinc-700 text-zinc-400 hover:border-zinc-500'
+              }`}
+            >
+              usa IR <span className="opacity-50">{stats.irCount.toLocaleString('it-IT')}</span>
+            </button>
+          )}
+          {(gains.size > 0 || brand || fx || amp || cab || ir) && (
             <button
               onClick={() => {
                 setGains(new Set())
                 setBrand('')
                 setFx('')
+                setAmp('')
+                setCab('')
+                setIr(false)
               }}
               className="text-xs whitespace-nowrap text-zinc-500 underline hover:text-zinc-300"
             >

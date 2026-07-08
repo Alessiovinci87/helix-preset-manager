@@ -10,6 +10,12 @@ export interface LibraryStats {
   brands: { brand: string; count: number }[]
   /** tutte le categorie effetti, ordinate per frequenza */
   fxs: { fx: string; count: number }[]
+  /** tutti i modelli amp (nome Helix), ordinati per frequenza */
+  amps: { amp: string; count: number }[]
+  /** tutti i modelli cab: value = modello raw (HD2_Cab…), label = nome leggibile */
+  cabs: { cab: string; label: string; count: number }[]
+  /** preset che richiedono un file IR */
+  irCount: number
 }
 
 export interface PresetSummary {
@@ -59,6 +65,12 @@ export interface SearchRequest {
   brand?: string
   /** filtra per categoria effetto (es. delay) */
   fx?: string
+  /** filtra per modello amp esatto (nome Helix, es. Brit Plexi Brt) */
+  amp?: string
+  /** filtra per modello cab raw (es. HD2_Cab4x12Greenback25) */
+  cab?: string
+  /** true = solo preset che usano un blocco IR */
+  ir?: boolean
 }
 
 export interface SearchResponse {
