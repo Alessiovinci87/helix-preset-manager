@@ -1,5 +1,14 @@
 // Tipi condivisi tra main, preload e renderer (contratto IPC)
 
+/** Dati personali dell'utente su un preset (persistono nei re-import, chiave = content_hash) */
+export interface UserData {
+  fav: boolean
+  /** 0 = nessun voto, 1-5 stelle */
+  rating: number
+  tags: string[]
+  note: string | null
+}
+
 export interface LibraryStats {
   total: number
   unique: number
@@ -16,6 +25,12 @@ export interface LibraryStats {
   cabs: { cab: string; label: string; count: number }[]
   /** preset che richiedono un file IR */
   irCount: number
+  /** tutti gli artisti rilevati, in ordine alfabetico */
+  artists: { artist: string; count: number }[]
+  /** tutti i tag utente, in ordine alfabetico */
+  tags: { tag: string; count: number }[]
+  /** preset marcati preferiti */
+  favCount: number
 }
 
 export interface PresetSummary {
@@ -32,6 +47,10 @@ export interface PresetSummary {
   usesIr: boolean
   dupOf: number | null
   parentSetlist: string | null
+  fav: boolean
+  rating: number
+  tags: string[]
+  hasNote: boolean
 }
 
 export interface PresetBlock {
@@ -39,6 +58,8 @@ export interface PresetBlock {
   position: number
   model: string
   enabled: boolean
+  /** parametri del blocco (per il confronto preset) */
+  params: Record<string, unknown>
 }
 
 export interface PresetDetail extends PresetSummary {
@@ -52,6 +73,7 @@ export interface PresetDetail extends PresetSummary {
   info: string | null
   sourceFile: string
   blocks: PresetBlock[]
+  note: string | null
 }
 
 export interface SearchRequest {
@@ -71,6 +93,12 @@ export interface SearchRequest {
   cab?: string
   /** true = solo preset che usano un blocco IR */
   ir?: boolean
+  /** filtra per artista rilevato (es. Pink Floyd) */
+  artist?: string
+  /** true = solo preferiti */
+  favOnly?: boolean
+  /** filtra per tag utente */
+  tag?: string
 }
 
 export interface SearchResponse {
@@ -117,4 +145,15 @@ export interface HelixApi {
   openInHxEdit: (id: number) => Promise<void>
   /** avvisi dal main process (es. file sorgente non trovato) */
   onNotice: (cb: (msg: string) => void) => () => void
+  /** aggiorna preferito/voto/tag/nota; ritorna lo stato aggiornato */
+  setUserData: (id: number, patch: Partial<UserData>) => Promise<UserData | null>
+  /** percorso assoluto di un File del drag&drop (webUtils) */
+  pathForFile: (f: File) => string
+  /** importa percorsi rilasciati nella finestra (cartelle, ZIP, .hlx) */
+  importPaths: (paths: string[]) => Promise<ImportResult | null>
+  /** esporta i preset scelti come setlist .hls; null se annullato */
+  exportSetlist: (
+    ids: number[],
+    name: string,
+  ) => Promise<{ file: string; written: number; skipped: string[] } | null>
 }

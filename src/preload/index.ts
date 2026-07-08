@@ -1,5 +1,5 @@
-import { contextBridge, ipcRenderer } from 'electron'
-import type { HelixApi, ImportProgress, SearchRequest } from '../shared/types'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
+import type { HelixApi, ImportProgress, SearchRequest, UserData } from '../shared/types'
 
 const api: HelixApi = {
   stats: () => ipcRenderer.invoke('db:stats'),
@@ -19,6 +19,12 @@ const api: HelixApi = {
     ipcRenderer.on('app:notice', listener)
     return () => ipcRenderer.removeListener('app:notice', listener)
   },
+  setUserData: (id: number, patch: Partial<UserData>) =>
+    ipcRenderer.invoke('user:set', id, patch),
+  pathForFile: (f: File) => webUtils.getPathForFile(f),
+  importPaths: (paths: string[]) => ipcRenderer.invoke('import:paths', paths),
+  exportSetlist: (ids: number[], name: string) =>
+    ipcRenderer.invoke('setlist:export', ids, name),
 }
 
 contextBridge.exposeInMainWorld('api', api)

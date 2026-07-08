@@ -378,7 +378,7 @@ function main() {
   } catch { /* DB nuovo, nessuno stato precedente */ }
 
   const isPresetName = n =>
-    /\.(hlx|hsp)(\s+copy)?$/i.test(n) || /[\\/](U2 40|Purple|PRS Archon|Cougar ATT 15)$/.test(n);
+    /\.(hlx|hsp|hls)(\s+copy)?$/i.test(n) || /[\\/](U2 40|Purple|PRS Archon|Cougar ATT 15)$/.test(n);
 
   // prima passata: elenca i candidati (file sciolti + entry dentro gli ZIP)
   // root può essere una cartella oppure direttamente un archivio .zip

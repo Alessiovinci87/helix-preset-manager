@@ -55,7 +55,7 @@ export function physicalPath(sourceFile: string): string {
 }
 
 /** Legge i byte grezzi del sorgente, dentro o fuori da uno ZIP. */
-function readSourceBuffer(sourceFile: string): Buffer {
+export function readSourceBuffer(sourceFile: string): Buffer {
   const m = sourceFile.match(ZIP_RE)
   if (!m) return readFileSync(sourceFile)
   const zbuf = readFileSync(m[1])

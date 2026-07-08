@@ -1,24 +1,61 @@
 import { DatabaseSync } from 'node:sqlite'
+import { pathToFileURL } from 'node:url'
+import { prettyCab } from '../shared/cab'
 import type {
   LibraryStats,
   PresetDetail,
   PresetSummary,
   SearchRequest,
   SearchResponse,
+  UserData,
 } from '../shared/types'
 
+// Connessione primaria = userdata.db (scrivibile: preferiti/voti/tag/note).
+// La libreria helix.db è ATTACH-ata in sola lettura come schema "lib":
+// i nomi non qualificati (presets, blocks, presets_fts) si risolvono lì.
 let db: DatabaseSync | null = null
+let libAttached = false
 
-export function openDb(path: string): void {
-  db = new DatabaseSync(path, { readOnly: true })
+export function openDb(libPath: string, userPath: string): void {
+  db?.close()
+  db = new DatabaseSync(userPath)
+  db.exec(`
+    PRAGMA journal_mode = WAL;
+    CREATE TABLE IF NOT EXISTS user_prefs (
+      hash TEXT PRIMARY KEY,
+      fav INTEGER NOT NULL DEFAULT 0,
+      rating INTEGER NOT NULL DEFAULT 0,
+      tags TEXT NOT NULL DEFAULT '[]',
+      note TEXT
+    );
+  `)
+  const uri = `${pathToFileURL(libPath).href}?mode=ro`
+  const attach = () => {
+    db!.exec(`ATTACH DATABASE '${uri.replaceAll("'", "''")}' AS lib`)
+    db!.prepare('SELECT COUNT(*) FROM presets LIMIT 1').get() // verifica leggibilità
+  }
+  try {
+    attach()
+  } catch {
+    // WAL "caldo" (import interrotto): il recovery richiede scrittura → apri
+    // e chiudi la libreria in rw per ripristinarla, poi riprova in sola lettura
+    new DatabaseSync(libPath).close()
+    try {
+      db.exec('DETACH DATABASE lib')
+    } catch {
+      /* mai agganciato */
+    }
+    attach()
+  }
+  libAttached = true
 }
 
 function need(): DatabaseSync {
-  if (!db) throw new Error('Database non aperto')
+  if (!db || !libAttached) throw new Error('Database non aperto')
   return db
 }
 
-export const isOpen = (): boolean => db !== null
+export const isOpen = (): boolean => db !== null && libAttached
 
 export function getSourceFile(id: number): string | null {
   const r = need().prepare('SELECT source_file f FROM presets WHERE id = ?').get(id) as
@@ -44,6 +81,42 @@ export function getPresetFileInfo(id: number): PresetFileInfo | null {
   return { file: r.f, slot: r.slot, parentSetlist: r.p, name: r.name }
 }
 
+/** Info necessarie all'export setlist (sorgente + tipo schema). */
+export interface ExportInfo extends PresetFileInfo {
+  id: number
+  schemaType: string
+}
+
+export function getExportInfos(ids: number[]): ExportInfo[] {
+  if (!ids.length) return []
+  const rows = need()
+    .prepare(
+      `SELECT id, name, source_file f, slot, parent_setlist p, schema_type s
+       FROM presets WHERE id IN (${ids.map(() => '?').join(',')})`,
+    )
+    .all(...ids) as {
+    id: number
+    name: string
+    f: string
+    slot: number | null
+    p: string | null
+    s: string
+  }[]
+  // preserva l'ordine di selezione
+  const byId = new Map(rows.map((r) => [r.id, r]))
+  return ids
+    .map((id) => byId.get(id))
+    .filter(Boolean)
+    .map((r) => ({
+      id: r!.id,
+      name: r!.name,
+      file: r!.f,
+      slot: r!.slot,
+      parentSetlist: r!.p,
+      schemaType: r!.s,
+    }))
+}
+
 const parseJson = <T>(s: string | null, fallback: T): T => {
   if (!s) return fallback
   try {
@@ -52,6 +125,11 @@ const parseJson = <T>(s: string | null, fallback: T): T => {
     return fallback
   }
 }
+
+// SELECT comune: preset + dati utente agganciati per content_hash
+const SUMMARY_SELECT =
+  'p.*, u.fav AS u_fav, u.rating AS u_rating, u.tags AS u_tags, u.note AS u_note'
+const USER_JOIN = 'LEFT JOIN user_prefs u ON u.hash = p.content_hash'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function toSummary(r: any): PresetSummary {
@@ -69,6 +147,10 @@ function toSummary(r: any): PresetSummary {
     usesIr: !!r.uses_ir,
     dupOf: r.dup_of,
     parentSetlist: r.parent_setlist,
+    fav: !!r.u_fav,
+    rating: r.u_rating ?? 0,
+    tags: parseJson(r.u_tags, []),
+    hasNote: !!r.u_note,
   }
 }
 
@@ -114,6 +196,25 @@ export function getStats(): LibraryStats {
   const irCount = (
     d.prepare('SELECT COUNT(*) c FROM presets WHERE uses_ir = 1').get() as { c: number }
   ).c
+
+  // dati utente: conteggio preferiti e tag (solo su hash presenti in libreria)
+  const favCount = (
+    d
+      .prepare(
+        `SELECT COUNT(*) c FROM presets p JOIN user_prefs u ON u.hash = p.content_hash
+         WHERE u.fav = 1 AND p.dup_of IS NULL`,
+      )
+      .get() as { c: number }
+  ).c
+  const tagCounts = new Map<string, number>()
+  for (const r of d
+    .prepare(
+      `SELECT u.tags t FROM presets p JOIN user_prefs u ON u.hash = p.content_hash
+       WHERE u.tags != '[]' AND p.dup_of IS NULL`,
+    )
+    .all() as { t: string }[])
+    for (const t of parseJson<string[]>(r.t, [])) tagCounts.set(t, (tagCounts.get(t) ?? 0) + 1)
+
   const sorted = (m: Map<string, number>) => [...m.entries()].sort((a, b) => b[1] - a[1])
   // per i dropdown: ordine alfabetico (i "top" restano per frequenza)
   const alpha = (m: Map<string, number>) =>
@@ -132,19 +233,10 @@ export function getStats(): LibraryStats {
     amps: alpha(ampCounts).map(([amp, count]) => ({ amp, count })),
     cabs,
     irCount,
+    artists: alpha(artistCounts).map(([artist, count]) => ({ artist, count })),
+    tags: alpha(tagCounts).map(([tag, count]) => ({ tag, count })),
+    favCount,
   }
-}
-
-/** "HD2_Cab4x12Greenback25" → "4x12 Greenback25"; varianti MicIr/WithPan distinte nel suffisso */
-function prettyCab(model: string): string {
-  const dualMic = /^HD2_CabMicIr_/.test(model)
-  const withPan = /WithPan$/.test(model)
-  const name = model
-    .replace(/^HD2_Cab(MicIr_)?/, '')
-    .replace(/WithPan$/, '')
-    .replace(/(\d)([A-Z])/g, '$1 $2')
-    .replace(/([a-z])([A-Z])/g, '$1 $2')
-  return dualMic ? `${name} (dual mic${withPan ? ' + pan' : ''})` : name
 }
 
 /** Costruisce la MATCH expression FTS5 con prefix matching per token. */
@@ -188,15 +280,27 @@ export function search(req: SearchRequest): SearchResponse {
     params.push(req.cab)
   }
   if (req.ir) conds.push('p.uses_ir = 1')
+  if (req.artist) {
+    conds.push('p.artists LIKE ?')
+    params.push(`%${JSON.stringify(req.artist)}%`)
+  }
+  if (req.favOnly) conds.push('u.fav = 1')
+  if (req.tag) {
+    conds.push('u.tags LIKE ?')
+    params.push(`%${JSON.stringify(req.tag)}%`)
+  }
 
   if (!q) {
     const where = conds.length ? `WHERE ${conds.join(' AND ')}` : ''
     const total = (
-      d.prepare(`SELECT COUNT(*) c FROM presets p ${where}`).get(...params) as { c: number }
+      d
+        .prepare(`SELECT COUNT(*) c FROM presets p ${USER_JOIN} ${where}`)
+        .get(...params) as { c: number }
     ).c
     const rows = d
       .prepare(
-        `SELECT p.* FROM presets p ${where} ORDER BY p.name COLLATE NOCASE LIMIT ? OFFSET ?`,
+        `SELECT ${SUMMARY_SELECT} FROM presets p ${USER_JOIN} ${where}
+         ORDER BY p.name COLLATE NOCASE LIMIT ? OFFSET ?`,
       )
       .all(...params, limit, offset)
     return { rows: rows.map(toSummary), total }
@@ -207,14 +311,14 @@ export function search(req: SearchRequest): SearchResponse {
   const total = (
     d
       .prepare(
-        `SELECT COUNT(*) c FROM presets_fts f JOIN presets p ON p.id = f.rowid
+        `SELECT COUNT(*) c FROM presets_fts f JOIN presets p ON p.id = f.rowid ${USER_JOIN}
          WHERE presets_fts MATCH ? ${extra}`,
       )
       .get(match, ...params) as { c: number }
   ).c
   const rows = d
     .prepare(
-      `SELECT p.* FROM presets_fts f JOIN presets p ON p.id = f.rowid
+      `SELECT ${SUMMARY_SELECT} FROM presets_fts f JOIN presets p ON p.id = f.rowid ${USER_JOIN}
        WHERE presets_fts MATCH ? ${extra} ORDER BY rank LIMIT ? OFFSET ?`,
     )
     .all(match, ...params, limit, offset)
@@ -223,17 +327,25 @@ export function search(req: SearchRequest): SearchResponse {
 
 export function show(id: number): PresetDetail | null {
   const d = need()
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const p = d.prepare('SELECT * FROM presets WHERE id = ?').get(id) as any
+  const p = d
+    .prepare(`SELECT ${SUMMARY_SELECT} FROM presets p ${USER_JOIN} WHERE p.id = ?`)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    .get(id) as any
   if (!p) return null
   const blocks = (
     d
       .prepare(
-        'SELECT dsp, position, model, enabled FROM blocks WHERE preset_id = ? ORDER BY dsp, position',
+        'SELECT dsp, position, model, enabled, params_json FROM blocks WHERE preset_id = ? ORDER BY dsp, position',
       )
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .all(id) as any[]
-  ).map((b) => ({ dsp: b.dsp, position: b.position, model: b.model, enabled: !!b.enabled }))
+  ).map((b) => ({
+    dsp: b.dsp,
+    position: b.position,
+    model: b.model,
+    enabled: !!b.enabled,
+    params: parseJson<Record<string, unknown>>(b.params_json, {}),
+  }))
 
   return {
     ...toSummary(p),
@@ -247,5 +359,30 @@ export function show(id: number): PresetDetail | null {
     info: p.info,
     sourceFile: p.source_file,
     blocks,
+    note: p.u_note ?? null,
   }
+}
+
+// ── dati utente ────────────────────────────────────────────────
+export function setUserData(id: number, patch: Partial<UserData>): UserData | null {
+  const d = need()
+  const r = d.prepare('SELECT content_hash h FROM presets WHERE id = ?').get(id) as
+    | { h: string }
+    | undefined
+  if (!r) return null
+  const cur = d
+    .prepare('SELECT fav, rating, tags, note FROM user_prefs WHERE hash = ?')
+    .get(r.h) as { fav: number; rating: number; tags: string; note: string | null } | undefined
+  const next: UserData = {
+    fav: patch.fav ?? !!cur?.fav,
+    rating: patch.rating ?? cur?.rating ?? 0,
+    tags: patch.tags ?? parseJson<string[]>(cur?.tags ?? null, []),
+    note: patch.note !== undefined ? patch.note : (cur?.note ?? null),
+  }
+  d.prepare(
+    `INSERT INTO user_prefs (hash, fav, rating, tags, note) VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(hash) DO UPDATE SET fav = excluded.fav, rating = excluded.rating,
+       tags = excluded.tags, note = excluded.note`,
+  ).run(r.h, next.fav ? 1 : 0, next.rating, JSON.stringify(next.tags), next.note)
+  return next
 }

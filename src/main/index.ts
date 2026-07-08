@@ -10,9 +10,20 @@ import {
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { existsSync, writeFileSync } from 'node:fs'
-import { openDb, getStats, search, show, isOpen, getSourceFile, getPresetFileInfo } from './db'
+import {
+  openDb,
+  getStats,
+  search,
+  show,
+  isOpen,
+  getSourceFile,
+  getPresetFileInfo,
+  setUserData,
+} from './db'
 import { materializePreset, physicalPath, sourceExists } from './extract'
-import type { ImportProgress, ImportResult, SearchRequest } from '../shared/types'
+import { buildSetlist } from './setlist'
+import type { ImportProgress, ImportResult, SearchRequest, UserData } from '../shared/types'
+import electronUpdater from 'electron-updater'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -132,14 +143,33 @@ function createWindow(): void {
 
 let importing = false
 
+const userdataPath = (): string => join(app.getPath('userData'), 'userdata.db')
+
 app.whenReady().then(() => {
   currentDbPath = resolveDbPath()
-  if (currentDbPath) openDb(currentDbPath)
+  console.log('DB path:', currentDbPath, '| userdata:', userdataPath())
+  if (currentDbPath) {
+    try {
+      openDb(currentDbPath, userdataPath())
+      console.log('openDb OK, isOpen:', isOpen())
+    } catch (e) {
+      console.error('openDb FALLITO:', e)
+    }
+  }
+
+  // auto-update da GitHub Releases (solo app installata; silenzioso se offline)
+  if (app.isPackaged && !process.env.HELIX_CAPTURE) {
+    electronUpdater.autoUpdater.checkForUpdatesAndNotify().catch(() => {})
+  }
 
   ipcMain.handle('db:stats', () => (isOpen() ? getStats() : null))
-  ipcMain.handle('db:search', (_e, req: SearchRequest) =>
-    isOpen() ? search(req) : { rows: [], total: 0 },
-  )
+  ipcMain.handle('db:search', (_e, req: SearchRequest) => {
+    if (!isOpen()) return { rows: [], total: 0 }
+    const res = search(req)
+    if (process.env.HELIX_CAPTURE)
+      console.log('search', JSON.stringify(req), '→ total', res.total)
+    return res
+  })
   ipcMain.handle('db:show', (_e, id: number) => (isOpen() ? show(id) : null))
 
   ipcMain.handle('import:folder', async (e, mode: 'folder' | 'zip' = 'folder') => {
@@ -167,11 +197,56 @@ app.whenReady().then(() => {
     try {
       const dbPath = currentDbPath ?? join(app.getPath('userData'), 'helix.db')
       const result = await runIngest(res.filePaths[0], dbPath, e.sender)
-      if (!isOpen()) openDb(dbPath)
+      if (!isOpen()) openDb(dbPath, userdataPath())
       currentDbPath = dbPath
       return result
     } finally {
       importing = false
+    }
+  })
+
+  // import di percorsi rilasciati con drag&drop (cartelle, ZIP, singoli .hlx)
+  ipcMain.handle('import:paths', async (e, paths: string[]) => {
+    if (importing || !paths?.length) return null
+    importing = true
+    try {
+      const dbPath = currentDbPath ?? join(app.getPath('userData'), 'helix.db')
+      const sum: ImportResult = {
+        seconds: 0, files: 0, presets: 0, fromSetlists: 0, hsp: 0,
+        dupFile: 0, dupContent: 0, errors: 0,
+      }
+      for (const p of paths) {
+        const r = await runIngest(p, dbPath, e.sender)
+        for (const k of Object.keys(sum) as (keyof ImportResult)[]) sum[k] += r[k]
+      }
+      if (!isOpen()) openDb(dbPath, userdataPath())
+      currentDbPath = dbPath
+      return sum
+    } finally {
+      importing = false
+    }
+  })
+
+  ipcMain.handle('user:set', (_e, id: number, patch: Partial<UserData>) =>
+    isOpen() ? setUserData(id, patch) : null,
+  )
+
+  ipcMain.handle('setlist:export', async (e, ids: number[], name: string) => {
+    if (!isOpen() || !ids?.length) return null
+    const win = BrowserWindow.fromWebContents(e.sender)
+    if (!win) return null
+    const safe = name.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').trim() || 'Setlist'
+    const res = await dialog.showSaveDialog(win, {
+      title: 'Salva setlist per HX Edit',
+      defaultPath: `${safe}.hls`,
+      filters: [{ name: 'Setlist HX Edit', extensions: ['hls'] }],
+    })
+    if (res.canceled || !res.filePath) return null
+    try {
+      return buildSetlist(ids, name, res.filePath)
+    } catch (err) {
+      notice(e, `Export setlist fallito: ${(err as Error).message}`)
+      return null
     }
   })
 
@@ -228,7 +303,7 @@ app.whenReady().then(() => {
     const dbPath = currentDbPath ?? join(app.getPath('userData'), 'helix.db')
     runIngest(process.env.HELIX_IMPORT, dbPath, win.webContents)
       .then((r) => {
-        if (!isOpen()) openDb(dbPath)
+        if (!isOpen()) openDb(dbPath, userdataPath())
         currentDbPath = dbPath
         console.log('AUTO-IMPORT OK', JSON.stringify(r))
       })
