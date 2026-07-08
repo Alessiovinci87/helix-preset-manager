@@ -144,14 +144,25 @@ app.whenReady().then(() => {
     }
   })
 
-  ipcMain.handle('preset:reveal', (_e, id: number) => {
+  const fileOrNotice = (e: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent, id: number) => {
     const file = getSourceFile(id)
-    if (file && existsSync(file)) shell.showItemInFolder(file)
+    if (file && existsSync(file)) return file
+    e.sender.send(
+      'app:notice',
+      `File non trovato sul disco: ${file ?? `preset #${id}`}. ` +
+        'Se hai spostato la cartella dei preset, re-importala per aggiornare la libreria.',
+    )
+    return null
+  }
+
+  ipcMain.handle('preset:reveal', (e, id: number) => {
+    const file = fileOrNotice(e, id)
+    if (file) shell.showItemInFolder(file)
   })
 
   ipcMain.on('preset:drag', (e, id: number) => {
-    const file = getSourceFile(id)
-    if (file && existsSync(file)) e.sender.startDrag({ file, icon: DRAG_ICON })
+    const file = fileOrNotice(e, id)
+    if (file) e.sender.startDrag({ file, icon: DRAG_ICON })
   })
 
   createWindow()

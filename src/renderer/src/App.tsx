@@ -200,6 +200,7 @@ export default function App() {
   }, [])
 
   useEffect(() => window.api.onImportProgress(setProgress), [])
+  useEffect(() => window.api.onNotice(setError), [])
 
   const doImport = useCallback(() => {
     setImporting(true)
@@ -289,8 +290,13 @@ export default function App() {
       </header>
 
       {error && (
-        <div className="border-b border-red-900 bg-red-950/50 px-4 py-2 text-sm text-red-300">
-          {error}
+        <div className="flex items-center gap-3 border-b border-red-900 bg-red-950/50 px-4 py-2 text-sm text-red-300">
+          <span className="min-w-0 flex-1 truncate" title={error}>
+            {error}
+          </span>
+          <button onClick={() => setError(null)} className="shrink-0 hover:text-red-100">
+            ✕
+          </button>
         </div>
       )}
 

@@ -345,7 +345,7 @@ function main() {
 
   db.exec('BEGIN');
   for (const file of walk(root)) {
-    if (!/\.(hlx|hsp)(\s+copy)?$/i.test(file) && !/\/(U2 40|Purple|PRS Archon|Cougar ATT 15)$/.test(file)) continue;
+    if (!/\.(hlx|hsp)(\s+copy)?$/i.test(file) && !/[\\/](U2 40|Purple|PRS Archon|Cougar ATT 15)$/.test(file)) continue;
     stats.files++;
     if (jsonOut && stats.files % 200 === 0)
       console.log(JSON.stringify({ type: 'progress', files: stats.files, presets: stats.presets }));
