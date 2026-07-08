@@ -103,35 +103,45 @@ export function search(req: SearchRequest): SearchResponse {
   const d = need()
   const limit = Math.min(req.limit ?? 100, 500)
   const offset = req.offset ?? 0
-  const noDup = req.noDup ? 'AND p.dup_of IS NULL' : ''
   const q = req.query.trim()
 
+  const conds: string[] = []
+  const params: (string | number)[] = []
+  if (req.noDup) conds.push('p.dup_of IS NULL')
+  if (req.gains?.length) {
+    conds.push(`p.gain_class IN (${req.gains.map(() => '?').join(',')})`)
+    params.push(...req.gains)
+  }
+
   if (!q) {
-    const where = req.noDup ? 'WHERE dup_of IS NULL' : ''
+    const where = conds.length ? `WHERE ${conds.join(' AND ')}` : ''
     const total = (
-      d.prepare(`SELECT COUNT(*) c FROM presets ${where}`).get() as { c: number }
+      d.prepare(`SELECT COUNT(*) c FROM presets p ${where}`).get(...params) as { c: number }
     ).c
     const rows = d
-      .prepare(`SELECT * FROM presets ${where} ORDER BY name COLLATE NOCASE LIMIT ? OFFSET ?`)
-      .all(limit, offset)
+      .prepare(
+        `SELECT p.* FROM presets p ${where} ORDER BY p.name COLLATE NOCASE LIMIT ? OFFSET ?`,
+      )
+      .all(...params, limit, offset)
     return { rows: rows.map(toSummary), total }
   }
 
   const match = ftsQuery(q)
+  const extra = conds.length ? `AND ${conds.join(' AND ')}` : ''
   const total = (
     d
       .prepare(
         `SELECT COUNT(*) c FROM presets_fts f JOIN presets p ON p.id = f.rowid
-         WHERE presets_fts MATCH ? ${noDup}`,
+         WHERE presets_fts MATCH ? ${extra}`,
       )
-      .get(match) as { c: number }
+      .get(match, ...params) as { c: number }
   ).c
   const rows = d
     .prepare(
       `SELECT p.* FROM presets_fts f JOIN presets p ON p.id = f.rowid
-       WHERE presets_fts MATCH ? ${noDup} ORDER BY rank LIMIT ? OFFSET ?`,
+       WHERE presets_fts MATCH ? ${extra} ORDER BY rank LIMIT ? OFFSET ?`,
     )
-    .all(match, limit, offset)
+    .all(match, ...params, limit, offset)
   return { rows: rows.map(toSummary), total }
 }
 

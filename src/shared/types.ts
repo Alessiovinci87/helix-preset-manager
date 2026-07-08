@@ -49,6 +49,8 @@ export interface SearchRequest {
   limit?: number
   offset?: number
   noDup?: boolean
+  /** filtra per classi di gain (clean, crunch, …); vuoto/assente = tutte */
+  gains?: string[]
 }
 
 export interface SearchResponse {

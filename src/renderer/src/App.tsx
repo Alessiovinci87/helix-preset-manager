@@ -6,6 +6,8 @@ import type {
   PresetSummary,
 } from '../../shared/types'
 
+const GAIN_ORDER = ['clean', 'edge', 'crunch', 'lead', 'highgain', 'acoustic', 'ambient', 'fx-only']
+
 const GAIN_COLORS: Record<string, string> = {
   clean: 'bg-sky-500/15 text-sky-400',
   edge: 'bg-teal-500/15 text-teal-400',
@@ -202,6 +204,7 @@ export default function App() {
   const [rows, setRows] = useState<PresetSummary[]>([])
   const [total, setTotal] = useState(0)
   const [noDup, setNoDup] = useState(true)
+  const [gains, setGains] = useState<Set<string>>(new Set())
   const [detail, setDetail] = useState<PresetDetail | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [importing, setImporting] = useState(false)
@@ -227,7 +230,7 @@ export default function App() {
       .then((res) => {
         if (!res) return // annullato
         window.api.stats().then(setStats)
-        runSearch(query, noDup)
+        runSearch(query, noDup, gains)
         setProgress(null)
         if (res.errors > 0)
           setError(`Import completato con ${res.errors} file non riconosciuti`)
@@ -235,12 +238,12 @@ export default function App() {
       .catch((e) => setError(String(e)))
       .finally(() => setImporting(false))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, noDup])
+  }, [query, noDup, gains])
 
-  const runSearch = useCallback((q: string, nd: boolean) => {
+  const runSearch = useCallback((q: string, nd: boolean, g: Set<string>) => {
     const mySeq = ++seq.current
     window.api
-      .search({ query: q, limit: 200, noDup: nd })
+      .search({ query: q, limit: 200, noDup: nd, gains: [...g] })
       .then((res) => {
         if (seq.current !== mySeq) return // risposta stantia
         setRows(res.rows)
@@ -250,9 +253,9 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    const t = setTimeout(() => runSearch(query, noDup), 150)
+    const t = setTimeout(() => runSearch(query, noDup, gains), 150)
     return () => clearTimeout(t)
-  }, [query, noDup, runSearch])
+  }, [query, noDup, gains, runSearch])
 
   const openDetail = (id: number) =>
     window.api
@@ -304,6 +307,44 @@ export default function App() {
           </button>
         </div>
       </header>
+
+      {stats && (
+        <div className="flex items-center gap-2 overflow-x-auto border-b border-zinc-800 px-4 py-2">
+          <span className="text-[11px] font-semibold tracking-wider text-zinc-600 uppercase">
+            Suono
+          </span>
+          {GAIN_ORDER.map((g) => {
+            const count = stats.byGain.find((r) => r.gainClass === g)?.count
+            if (!count) return null
+            const active = gains.has(g)
+            return (
+              <button
+                key={g}
+                onClick={() => {
+                  const next = new Set(gains)
+                  active ? next.delete(g) : next.add(g)
+                  setGains(next)
+                }}
+                className={`rounded-full border px-3 py-1 text-xs whitespace-nowrap select-none ${
+                  active
+                    ? `border-transparent ${GAIN_COLORS[g]}`
+                    : 'border-zinc-700 text-zinc-400 hover:border-zinc-500'
+                }`}
+              >
+                {g} <span className="opacity-50">{count.toLocaleString('it-IT')}</span>
+              </button>
+            )
+          })}
+          {gains.size > 0 && (
+            <button
+              onClick={() => setGains(new Set())}
+              className="text-xs whitespace-nowrap text-zinc-500 underline hover:text-zinc-300"
+            >
+              azzera
+            </button>
+          )}
+        </div>
+      )}
 
       {error && (
         <div className="flex items-center gap-3 border-b border-red-900 bg-red-950/50 px-4 py-2 text-sm text-red-300">
